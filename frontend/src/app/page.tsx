@@ -281,6 +281,27 @@ export default function Home() {
               </select>
             </div>
           </div>
+
+          <div className="param-descriptions">
+            <div className="param-item">
+              <span className="param-name">Qubits</span>
+              <span className="param-desc">
+                Number of molecular properties encoded onto the quantum circuit. Each qubit represents one descriptor (e.g., molecular weight, lipophilicity, polar surface area). More qubits = richer comparison, but slower.
+              </span>
+            </div>
+            <div className="param-item">
+              <span className="param-name">Layers</span>
+              <span className="param-desc">
+                Depth of the quantum circuit. Each layer applies rotation and entanglement gates that capture interactions between molecular properties. More layers = more expressive similarity measure.
+              </span>
+            </div>
+            <div className="param-item">
+              <span className="param-name">ChEMBL Cutoff</span>
+              <span className="param-desc">
+                Minimum structural similarity (Tanimoto) to pre-filter candidates from ChEMBL{"'"} 2.4M+ compound database. Lower values cast a wider net; higher values return only close structural analogs.
+              </span>
+            </div>
+          </div>
         </div>
       </section>
 

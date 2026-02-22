@@ -283,6 +283,46 @@ code, .mono {
   border-color: var(--green);
 }
 
+/* Parameter descriptions */
+.param-descriptions {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.param-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.param-name {
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 600;
+  color: var(--green);
+  white-space: nowrap;
+  min-width: 100px;
+}
+
+.param-desc {
+  color: var(--text-muted);
+}
+
+@media (max-width: 768px) {
+  .param-item {
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .param-name {
+    min-width: unset;
+  }
+}
+
 /* Validation message */
 .validation-msg {
   margin-top: 0.5rem;
