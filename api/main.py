@@ -115,7 +115,7 @@ class SearchRequest(BaseModel):
     n_qubits: int = Field(default=8, ge=2, le=8, description="Number of qubits (2-8)")
     n_layers: int = Field(default=2, ge=1, le=4, description="Circuit depth (1-4)")
     top_k: int = Field(default=20, ge=1, le=50, description="Number of results to return")
-    chembl_cutoff: int = Field(default=70, ge=40, le=95, description="ChEMBL Tanimoto similarity cutoff (%)")
+    chembl_cutoff: int = Field(default=70, ge=20, le=95, description="ChEMBL Tanimoto similarity cutoff (%)")
     chembl_limit: int = Field(default=50, ge=10, le=100, description="Max compounds to pull from ChEMBL")
 
 

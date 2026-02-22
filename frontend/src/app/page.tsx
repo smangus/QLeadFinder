@@ -273,7 +273,7 @@ export default function Home() {
                 value={chemblCutoff}
                 onChange={(e) => setChemblCutoff(Number(e.target.value))}
               >
-                {[40, 50, 60, 70, 80, 90].map((n) => (
+                {[20, 30, 40, 50, 60, 70, 80, 90].map((n) => (
                   <option key={n} value={n}>
                     {n}%
                   </option>
