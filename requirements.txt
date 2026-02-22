@@ -1,0 +1,6 @@
+rdkit
+qiskit>=1.0
+qiskit-machine-learning>=0.7
+scikit-learn
+numpy
+pandas
