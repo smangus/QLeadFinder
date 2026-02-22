@@ -333,7 +333,7 @@ export default function Home() {
             </div>
             <div className="stat-card">
               <div className="stat-value">{result.stats.library_size}</div>
-              <div className="stat-label">ChEMBL Hits (>{result.stats.chembl_cutoff}%)</div>
+              <div className="stat-label">ChEMBL Hits (&gt;{result.stats.chembl_cutoff}%)</div>
             </div>
             <div className="stat-card">
               <div className="stat-value">
