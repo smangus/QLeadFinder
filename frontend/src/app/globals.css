@@ -6,9 +6,9 @@
   --bg-input: #0d1321;
   --border: #1e2a42;
   --border-focus: #00cc66;
-  --text-primary: #e2e8f0;
-  --text-secondary: #8b9ab5;
-  --text-muted: #5a6a85;
+  --text-primary: #ffffff;
+  --text-secondary: #b0bfd0;
+  --text-muted: #7a8da6;
   --green: #00cc66;
   --green-dim: #00cc6620;
   --green-glow: #00cc6640;
@@ -566,6 +566,60 @@ code, .mono {
   color: var(--red);
   font-size: 0.9rem;
   text-align: center;
+}
+
+/* Footer */
+.footer {
+  margin-top: 3rem;
+  padding-bottom: 1rem;
+}
+
+.footer-divider {
+  height: 1px;
+  background: var(--border);
+  margin-bottom: 1.5rem;
+}
+
+.footer-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.footer-built {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.footer-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.footer-logo-link {
+  display: flex;
+  align-items: center;
+  transition: opacity 0.2s;
+}
+
+.footer-logo-link:hover {
+  opacity: 0.8;
+}
+
+.footer-logo {
+  height: 28px;
+  width: auto;
+}
+
+.footer-tech {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
 }
 
 /* Responsive */

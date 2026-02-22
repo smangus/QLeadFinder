@@ -503,6 +503,22 @@ export default function Home() {
           </section>
         </>
       )}
+
+      {/* Footer */}
+      <footer className="footer">
+        <div className="footer-divider" />
+        <div className="footer-content">
+          <div className="footer-built">
+            <span className="footer-label">Built by</span>
+            <a href="https://scriptome.ai" target="_blank" rel="noopener noreferrer" className="footer-logo-link">
+              <img src="/scriptome_logo.png" alt="Scriptome.AI" className="footer-logo" />
+            </a>
+          </div>
+          <div className="footer-tech">
+            Powered by IBM Qiskit &middot; RDKit &middot; ChEMBL &middot; Next.js
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
