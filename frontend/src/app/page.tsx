@@ -15,6 +15,7 @@ interface CompoundResult {
   rank: number;
   name: string;
   smiles: string;
+  chembl_id: string | null;
   quantum_similarity: number;
   tanimoto_similarity: number;
   quantum_rank: number;
@@ -30,6 +31,7 @@ interface SearchResult {
   results: CompoundResult[];
   stats: {
     library_size: number;
+    chembl_cutoff: number;
     rank_correlation: number;
     disagreements: number;
     n_qubits: number;
@@ -52,6 +54,7 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [nQubits, setNQubits] = useState(8);
   const [nLayers, setNLayers] = useState(2);
+  const [chemblCutoff, setChemblCutoff] = useState(70);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SearchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -121,7 +124,9 @@ export default function Home() {
           query_smiles: query.trim(),
           n_qubits: nQubits,
           n_layers: nLayers,
-          top_k: 10,
+          top_k: 20,
+          chembl_cutoff: chemblCutoff,
+          chembl_limit: 50,
         }),
       });
 
@@ -144,7 +149,7 @@ export default function Home() {
       setError(err.message || "Failed to connect to QLeadFinder API");
       setLoading(false);
     }
-  }, [query, nQubits, nLayers]);
+  }, [query, nQubits, nLayers, chemblCutoff]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !loading) runSearch();
@@ -173,6 +178,7 @@ export default function Home() {
         <div className="header-badges">
           <span className="badge">IBM Qiskit</span>
           <span className="badge">RDKit</span>
+          <span className="badge">ChEMBL 2.4M+</span>
           <span className="badge">
             {nQubits} Qubits
           </span>
@@ -261,6 +267,19 @@ export default function Home() {
                 ))}
               </select>
             </div>
+            <div className="setting">
+              <label>ChEMBL Cutoff:</label>
+              <select
+                value={chemblCutoff}
+                onChange={(e) => setChemblCutoff(Number(e.target.value))}
+              >
+                {[40, 50, 60, 70, 80, 90].map((n) => (
+                  <option key={n} value={n}>
+                    {n}%
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
       </section>
@@ -314,7 +333,7 @@ export default function Home() {
             </div>
             <div className="stat-card">
               <div className="stat-value">{result.stats.library_size}</div>
-              <div className="stat-label">Compounds Searched</div>
+              <div className="stat-label">ChEMBL Hits (>{result.stats.chembl_cutoff}%)</div>
             </div>
             <div className="stat-card">
               <div className="stat-value">
@@ -359,7 +378,23 @@ export default function Home() {
                     <tr key={r.rank}>
                       <td className="rank-num">{r.rank}</td>
                       <td>
-                        <div className="compound-name">{r.name}</div>
+                        <div className="compound-name">
+                          {r.chembl_id ? (
+                            <a
+                              href={`https://www.ebi.ac.uk/chembl/compound_report_card/${r.chembl_id}/`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ color: "var(--text-primary)", textDecoration: "none" }}
+                            >
+                              {r.name}{" "}
+                              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                                {r.chembl_id}
+                              </span>
+                            </a>
+                          ) : (
+                            r.name
+                          )}
+                        </div>
                         <div className="compound-smiles">{r.smiles}</div>
                       </td>
                       <td>

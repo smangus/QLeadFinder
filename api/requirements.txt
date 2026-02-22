@@ -1,5 +1,6 @@
 fastapi
 uvicorn[standard]
+httpx
 rdkit
 qiskit>=1.0
 qiskit-machine-learning>=0.7

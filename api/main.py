@@ -2,14 +2,16 @@
 QLeadFinder API
 ================
 FastAPI backend wrapping the quantum molecular similarity search pipeline.
-Deployed on Railway, called by the Next.js frontend on Vercel.
+Searches ChEMBL's 2.4M+ compounds via their REST API, then re-ranks
+the top candidates using a quantum kernel (IBM Qiskit).
 """
 
 import os
 import sys
 import time
 import numpy as np
-import pandas as pd
+from urllib.parse import quote
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -31,15 +33,14 @@ from quantum_kernel import (
     compute_kernel_matrix,
     get_circuit_info,
 )
-from similarity_search import SAMPLE_LIBRARY
 
 # ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="QLeadFinder API",
-    description="Quantum-Enhanced Molecular Similarity Search powered by IBM Qiskit",
-    version="0.1.0",
+    description="Quantum-Enhanced Molecular Similarity Search powered by IBM Qiskit + ChEMBL",
+    version="0.2.0",
 )
 
 app.add_middleware(
@@ -54,6 +55,57 @@ app.add_middleware(
     allow_origin_regex=r"https://.*\.vercel\.app",
 )
 
+CHEMBL_BASE = "https://www.ebi.ac.uk/chembl/api/data"
+
+
+# ---------------------------------------------------------------------------
+# ChEMBL integration
+# ---------------------------------------------------------------------------
+async def chembl_similarity_search(
+    smiles: str,
+    similarity_cutoff: int = 70,
+    limit: int = 50,
+) -> list[dict]:
+    """
+    Query ChEMBL similarity endpoint to find structurally similar compounds.
+    Returns list of {chembl_id, name, smiles, similarity} dicts.
+    """
+    encoded = quote(smiles, safe="")
+    url = f"{CHEMBL_BASE}/similarity/{encoded}/{similarity_cutoff}.json"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(url, params={"limit": limit})
+        resp.raise_for_status()
+        data = resp.json()
+
+    results = []
+    seen_smiles = set()
+    for mol in data.get("molecules", []):
+        structures = mol.get("molecule_structures") or {}
+        canonical = structures.get("canonical_smiles")
+        chembl_id = mol.get("molecule_chembl_id")
+        pref_name = mol.get("pref_name")
+        sim_score = mol.get("similarity")
+
+        if not canonical or not chembl_id:
+            continue
+        # Skip the query molecule itself
+        if canonical == smiles:
+            continue
+        # Deduplicate
+        if canonical in seen_smiles:
+            continue
+        seen_smiles.add(canonical)
+
+        results.append({
+            "chembl_id": chembl_id,
+            "name": pref_name or chembl_id,
+            "smiles": canonical,
+            "chembl_similarity": float(sim_score) if sim_score else None,
+        })
+
+    return results
+
 
 # ---------------------------------------------------------------------------
 # Request / Response models
@@ -62,13 +114,16 @@ class SearchRequest(BaseModel):
     query_smiles: str = Field(..., description="SMILES string of the query molecule")
     n_qubits: int = Field(default=8, ge=2, le=8, description="Number of qubits (2-8)")
     n_layers: int = Field(default=2, ge=1, le=4, description="Circuit depth (1-4)")
-    top_k: int = Field(default=10, ge=1, le=20, description="Number of results")
+    top_k: int = Field(default=20, ge=1, le=50, description="Number of results to return")
+    chembl_cutoff: int = Field(default=70, ge=40, le=95, description="ChEMBL Tanimoto similarity cutoff (%)")
+    chembl_limit: int = Field(default=50, ge=10, le=100, description="Max compounds to pull from ChEMBL")
 
 
 class CompoundResult(BaseModel):
     rank: int
     name: str
     smiles: str
+    chembl_id: str | None = None
     quantum_similarity: float
     tanimoto_similarity: float
     quantum_rank: int
@@ -99,17 +154,11 @@ class ValidateResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Reverse lookup: SMILES -> name
-# ---------------------------------------------------------------------------
-SMILES_TO_NAME = {v: k for k, v in SAMPLE_LIBRARY.items()}
-
-
-# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "qleadfinder-api"}
+    return {"status": "ok", "service": "qleadfinder-api", "version": "0.2.0", "database": "ChEMBL"}
 
 
 @app.post("/validate", response_model=ValidateResponse)
@@ -118,10 +167,8 @@ def validate_smiles(req: ValidateRequest):
     try:
         mol = smiles_to_mol(req.smiles)
         descs = compute_descriptors(req.smiles)
-        name = SMILES_TO_NAME.get(req.smiles)
         return ValidateResponse(
             valid=True,
-            name=name,
             descriptors={k: round(v, 2) for k, v in descs.items()},
         )
     except Exception as e:
@@ -129,8 +176,14 @@ def validate_smiles(req: ValidateRequest):
 
 
 @app.post("/search", response_model=SearchResponse)
-def similarity_search(req: SearchRequest):
-    """Run quantum similarity search against the compound library."""
+async def similarity_search(req: SearchRequest):
+    """
+    Quantum similarity search pipeline:
+    1. Query ChEMBL for structurally similar compounds (classical pre-filter)
+    2. Compute RDKit descriptors for all candidates
+    3. Run quantum kernel (Qiskit ZZFeatureMap) to re-rank
+    4. Return both rankings for comparison
+    """
     start = time.time()
 
     # Validate query
@@ -139,36 +192,76 @@ def similarity_search(req: SearchRequest):
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid SMILES: {req.query_smiles}")
 
-    library = SAMPLE_LIBRARY
-    lib_names = list(library.keys())
-    lib_smiles = list(library.values())
+    # Step 1: Pull candidates from ChEMBL
+    try:
+        chembl_hits = await chembl_similarity_search(
+            req.query_smiles,
+            similarity_cutoff=req.chembl_cutoff,
+            limit=req.chembl_limit,
+        )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"ChEMBL API error: {e.response.status_code}",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"ChEMBL API unavailable: {str(e)}")
 
-    # Step 1: Compute descriptors
+    if not chembl_hits:
+        raise HTTPException(
+            status_code=404,
+            detail="No similar compounds found in ChEMBL. Try lowering the similarity cutoff.",
+        )
+
+    # Filter out compounds that fail RDKit parsing
+    valid_hits = []
+    for hit in chembl_hits:
+        try:
+            smiles_to_mol(hit["smiles"])
+            valid_hits.append(hit)
+        except Exception:
+            continue
+
+    if not valid_hits:
+        raise HTTPException(status_code=404, detail="No valid compounds returned from ChEMBL.")
+
+    lib_names = [h["name"] for h in valid_hits]
+    lib_smiles = [h["smiles"] for h in valid_hits]
+    lib_chembl_ids = [h["chembl_id"] for h in valid_hits]
+
+    # Step 2: Compute descriptors
     all_smiles = [req.query_smiles] + lib_smiles
-    descriptor_matrix = compute_descriptor_matrix(all_smiles)
+    try:
+        descriptor_matrix = compute_descriptor_matrix(all_smiles)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Descriptor computation failed: {str(e)}")
+
     descriptor_matrix = descriptor_matrix[:, : req.n_qubits]
 
-    # Step 2: Normalize
+    # Step 3: Normalize for quantum encoding
     normalized, scaler = normalize_features(descriptor_matrix)
     query_features = normalized[0:1]
     library_features = normalized[1:]
 
-    # Step 3: Quantum kernel
+    # Step 4: Quantum kernel computation
     feature_map = create_zz_feature_map(
         req.n_qubits, reps=req.n_layers, entanglement="linear"
     )
     kernel = create_quantum_kernel(feature_map=feature_map)
     quantum_sims = compute_kernel_matrix(query_features, kernel, Y=library_features).flatten()
 
-    # Step 4: Tanimoto baseline
-    tanimoto_sims = [tanimoto_similarity(req.query_smiles, smi) for smi in lib_smiles]
+    # Step 5: Classical Tanimoto for comparison
+    tanimoto_sims = []
+    for smi in lib_smiles:
+        try:
+            tanimoto_sims.append(tanimoto_similarity(req.query_smiles, smi))
+        except Exception:
+            tanimoto_sims.append(0.0)
 
-    # Step 5: Build ranked results
+    # Step 6: Build ranked results
     desc_names = list(DESCRIPTOR_FUNCTIONS.keys())[: req.n_qubits]
 
-    # Quantum ranking
     q_order = np.argsort(-quantum_sims)
-    # Tanimoto ranking
     t_order = np.argsort(-np.array(tanimoto_sims))
 
     q_rank_map = {idx: rank + 1 for rank, idx in enumerate(q_order)}
@@ -181,6 +274,7 @@ def similarity_search(req: SearchRequest):
                 rank=rank + 1,
                 name=lib_names[idx],
                 smiles=lib_smiles[idx],
+                chembl_id=lib_chembl_ids[idx],
                 quantum_similarity=round(float(quantum_sims[idx]), 4),
                 tanimoto_similarity=round(float(tanimoto_sims[idx]), 4),
                 quantum_rank=q_rank_map[idx],
@@ -194,27 +288,29 @@ def similarity_search(req: SearchRequest):
         )
 
     # Stats
-    all_q_ranks = [q_rank_map[i] for i in range(len(lib_names))]
-    all_t_ranks = [t_rank_map[i] for i in range(len(lib_names))]
-    rank_corr = float(np.corrcoef(all_q_ranks, all_t_ranks)[0, 1])
-    disagreements = sum(1 for i in range(min(req.top_k, len(lib_names))) if q_order[i] != t_order[i])
+    n_compounds = len(valid_hits)
+    all_q_ranks = [q_rank_map[i] for i in range(n_compounds)]
+    all_t_ranks = [t_rank_map[i] for i in range(n_compounds)]
+    rank_corr = float(np.corrcoef(all_q_ranks, all_t_ranks)[0, 1]) if n_compounds > 1 else 1.0
+    top_n = min(req.top_k, n_compounds)
+    disagreements = sum(1 for i in range(top_n) if q_order[i] != t_order[i])
 
-    # Circuit info
     circuit_info = get_circuit_info(feature_map)
-    circuit_info.pop("circuit_diagram", None)  # Too large for JSON
+    circuit_info.pop("circuit_diagram", None)
 
     elapsed_ms = round((time.time() - start) * 1000, 1)
 
     return SearchResponse(
         query_smiles=req.query_smiles,
-        query_name=SMILES_TO_NAME.get(req.query_smiles),
+        query_name=None,
         query_descriptors={
             k: round(float(v), 2)
             for k, v in compute_descriptors(req.query_smiles).items()
         },
         results=results,
         stats={
-            "library_size": len(lib_names),
+            "library_size": n_compounds,
+            "chembl_cutoff": req.chembl_cutoff,
             "rank_correlation": round(rank_corr, 3),
             "disagreements": disagreements,
             "n_qubits": req.n_qubits,
@@ -223,20 +319,3 @@ def similarity_search(req: SearchRequest):
         circuit_info=circuit_info,
         computation_time_ms=elapsed_ms,
     )
-
-
-@app.get("/library")
-def get_library():
-    """Return the compound library with names and SMILES."""
-    compounds = []
-    for name, smiles in SAMPLE_LIBRARY.items():
-        try:
-            descs = compute_descriptors(smiles)
-            compounds.append({
-                "name": name,
-                "smiles": smiles,
-                "descriptors": {k: round(v, 2) for k, v in descs.items()},
-            })
-        except Exception:
-            compounds.append({"name": name, "smiles": smiles, "descriptors": {}})
-    return {"compounds": compounds, "count": len(compounds)}
